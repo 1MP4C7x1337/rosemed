@@ -23,35 +23,43 @@ elif [[ -n "${LAMBDA_CLOUD_INSTANCE_ID:-}" ]]; then
     PLATFORM="Lambda Labs"
 elif [[ -n "${COLAB_GPU:-}" ]] || [[ -n "${COLAB_RELEASE_TAG:-}" ]]; then
     PLATFORM="Google Colab"
+elif [[ -n "${LIGHTNING_CLOUD_PROJECT_ID:-}" ]] || [[ -d "/teamspace/studios" ]]; then
+    PLATFORM="Lightning.ai"
 fi
 
 echo "Detected platform: $PLATFORM"
 echo ""
 
-# ── Python 3.11 ──────────────────────────────────────────────
-if command -v python3.11 &>/dev/null; then
-    PYTHON=python3.11
-elif command -v python3 &>/dev/null; then
-    PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    if [[ "$PY_VERSION" == "3.11" ]]; then
-        PYTHON=python3
-    else
-        echo "Python 3.11 not found (found $PY_VERSION). Attempting install..."
-        if command -v apt-get &>/dev/null; then
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq python3.11 python3.11-venv python3.11-dev
-            PYTHON=python3.11
-        elif command -v yum &>/dev/null; then
-            sudo yum install -y python3.11 python3.11-devel
-            PYTHON=python3.11
-        else
-            echo "ERROR: Python 3.11 required. Install manually and re-run."
-            exit 1
+# ── Python 3.11+ (3.12 OK on Lightning.ai) ───────────────────
+_select_python() {
+    for candidate in python3.12 python3.11 python3; do
+        if command -v "$candidate" &>/dev/null; then
+            echo "$candidate"
+            return 0
         fi
-    fi
-else
-    echo "ERROR: Python not found. Install Python 3.11 and re-run."
+    done
+    return 1
+}
+
+if ! PYTHON=$(_select_python); then
+    echo "ERROR: Python 3 not found. Install Python 3.11+ and re-run."
     exit 1
+fi
+
+PY_MAJOR=$($PYTHON -c "import sys; print(sys.version_info.major)")
+PY_MINOR=$($PYTHON -c "import sys; print(sys.version_info.minor)")
+
+if [[ "$PY_MAJOR" -lt 3 ]] || [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 11 ]]; then
+    if [[ "$PLATFORM" == "Lightning.ai" ]] || [[ -n "${LIGHTNING_CLOUD_PROJECT_ID:-}" ]]; then
+        echo "ERROR: Python 3.11+ required (found ${PY_MAJOR}.${PY_MINOR})."
+        exit 1
+    fi
+    echo "Python 3.11+ not found (found ${PY_MAJOR}.${PY_MINOR}). Attempting install..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update -qq || true
+        sudo apt-get install -y -qq python3.11 python3.11-venv python3.11-dev || true
+        PYTHON=$(_select_python)
+    fi
 fi
 
 echo "Using Python: $($PYTHON --version)"
