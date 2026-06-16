@@ -99,7 +99,7 @@ CHAT_TEMPLATE=your-chat-template-id
 WANDB_API_KEY=optional_wandb_key
 ```
 
-### 2. Pipeline (4 Steps)
+### 2. Pipeline (5 Steps)
 
 ```bash
 # Step 1: Download base model (~60 GB)
@@ -113,9 +113,24 @@ python 3_finetune.py
 
 # Step 4: Merge adapter + export GGUF
 python 4_merge_and_export.py
+
+# Step 5: Full WHO + Bulgarian knowledge ingest (RAG + v2 training data)
+python 5b_download_bulgarian_pdfs.py   # optional: crawl MoH/NHIF PDFs
+python 5c_crawl_medical_web.py 800     # BFS crawl 20+ medical domains + PubMed
+python 5_ingest_knowledge_base.py      # merge everything into knowledge base
+
+# Continuous ingest loop (crawl → PDFs → ingest every run)
+python 5d_run_full_ingest_loop.py
 ```
 
-The pipeline ends at local export. **There is no upload step.**
+Step 5 builds `data/knowledge_base/chunks.jsonl` for RAG and creates
+`data/rosemed_train_full.jsonl` (original 2000 samples + all source Q&A).
+For a v2 fine-tune after step 3 finishes:
+
+```bash
+cp data/rosemed_train_full.jsonl data/rosemed_train.jsonl
+python 3_finetune.py
+```
 
 ### 3. Run API Server
 
@@ -184,6 +199,12 @@ rosemed/
 ├── 2_prepare_dataset.py       # Generate dataset
 ├── 3_finetune.py              # QLoRA fine-tuning
 ├── 4_merge_and_export.py      # Merge + GGUF export
+├── 5_ingest_knowledge_base.py # WHO + Bulgaria + Orphanet + crawl cache
+├── 5b_download_bulgarian_pdfs.py  # Crawl Bulgarian health PDFs
+├── 5c_crawl_medical_web.py    # BFS medical web crawler (WHO, NHIF, PubMed…)
+├── 5d_run_full_ingest_loop.py # One loop iteration: crawl + ingest
+├── crawl_config.py            # Crawl domain whitelist + seeds
+├── medical_sources.py         # Source catalog (150+ URLs)
 ├── server/
 │   ├── main.py                # FastAPI server
 │   ├── routes.py              # API routes
