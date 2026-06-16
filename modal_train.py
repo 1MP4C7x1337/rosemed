@@ -38,7 +38,7 @@ MODEL_VOL = modal.Volume.from_name("rosemed-models", create_if_missing=True)
 
 DATA_MOUNT = "/data"
 MODEL_MOUNT = "/models"
-OUTPUT_MOUNT = "/outputs"
+OUTPUT_MOUNT = "/models/outputs"
 WORK = "/root/rosemed"
 
 image = (
@@ -66,15 +66,17 @@ image = (
     .pip_install("unsloth-zoo")
     .pip_install("unsloth==2024.6.7")
     .env({"HF_HOME": f"{MODEL_MOUNT}/hf_cache"})
-)
-
-repo_mount = modal.Mount.from_local_dir(
-    ".",
-    remote_path=WORK,
-    condition=lambda pth: not any(
-        part in pth.replace("\\", "/")
-        for part in ("/models/", "/outputs/", "/.git/", "/data/sources/crawl/")
-    ),
+    .add_local_dir(
+        ".",
+        remote_path=WORK,
+        ignore=[
+            "data/sources/crawl/**",
+            "models/**",
+            "outputs/**",
+            ".git/**",
+            "**/__pycache__/**",
+        ],
+    )
 )
 
 
@@ -90,14 +92,28 @@ def _run(cmd: list[str], cwd: str) -> None:
     volumes={
         DATA_MOUNT: DATA_VOL,
         MODEL_MOUNT: MODEL_VOL,
-        OUTPUT_MOUNT: MODEL_VOL,
     },
     secrets=[modal.Secret.from_name("rosemed-secrets")],
-    mounts=[repo_mount],
 )
 def train_v2() -> None:
     """Download base model, prepare v2 dataset, fine-tune, merge."""
+    import shutil
+
     os.chdir(WORK)
+
+    # Persist models + outputs on Modal Volume
+    vol_models = Path(MODEL_MOUNT)
+    vol_outputs = vol_models / "outputs"
+    vol_models.mkdir(parents=True, exist_ok=True)
+    vol_outputs.mkdir(parents=True, exist_ok=True)
+    for rel, target in [("models", vol_models), ("outputs", vol_outputs)]:
+        p = Path(WORK) / rel
+        if p.is_symlink() or p.exists():
+            if p.is_symlink():
+                p.unlink()
+            else:
+                shutil.rmtree(p, ignore_errors=True)
+        p.symlink_to(target, target_is_directory=True)
 
     # Write .env from Modal secrets
     env_path = Path(WORK) / ".env"
@@ -143,19 +159,14 @@ def train_v2() -> None:
 
     MODEL_VOL.commit()
     print("Done. Download merged model:")
-    print("  modal volume get rosemed-models /rosemed-27b-bg ./outputs/rosemed-27b-bg")
+    print("  modal volume get rosemed-models /outputs/rosemed-27b-bg ./outputs/rosemed-27b-bg")
 
 
 @app.local_entrypoint()
-def main():
-    """Trigger v2 training on Modal."""
-    train_v2.remote()
-
-
-@app.local_entrypoint()
-def upload_hint():
-    """Print upload instructions."""
-    print("""
+def main(upload_hint_only: bool = False):
+    """Trigger v2 training on Modal. Pass --upload-hint-only for upload instructions."""
+    if upload_hint_only:
+        print("""
 After Lightning crawl finishes:
 
   cd ~/rosemed
@@ -164,3 +175,5 @@ After Lightning crawl finishes:
   modal volume put rosemed-data ./v2_pack.tar.gz /v2_pack.tar.gz
   modal run modal_train.py
 """)
+        return
+    train_v2.remote()
