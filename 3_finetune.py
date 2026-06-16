@@ -51,6 +51,13 @@ def _setup_wandb(cfg: Any) -> Optional[str]:
     return "rosemed-27b-bg"
 
 
+def _has_checkpoint(output_dir: Path) -> bool:
+    """Return True if a training checkpoint exists to resume from."""
+    if not output_dir.exists():
+        return False
+    return any(output_dir.glob("checkpoint-*"))
+
+
 def finetune() -> None:
     """Run QLoRA fine-tuning on the RoseMed dataset."""
     console.print(HEADER, style="bold cyan")
@@ -198,6 +205,9 @@ def finetune() -> None:
         run_name=wandb_run_name or "rosemed-27b-bg",
         seed=42,
         gradient_checkpointing=True,
+        dataloader_num_workers=0,
+        dataloader_pin_memory=False,
+        save_safetensors=True,
     )
 
     callbacks = [EarlyStoppingCallback(early_stopping_patience=3)]
@@ -222,7 +232,7 @@ def finetune() -> None:
             response_part=cfg.model_turn_start,
         )
 
-        train_result = trainer.train()
+        train_result = trainer.train(resume_from_checkpoint=_has_checkpoint(cfg.training.output_dir))
         eval_result = trainer.evaluate()
 
     except torch.cuda.OutOfMemoryError:
@@ -234,7 +244,8 @@ def finetune() -> None:
     except Exception as exc:
         console.print(
             f"[red]ERROR:[/red] Training failed: {exc}\n"
-            "Fix: Check logs above for details.",
+            "Fix: pip install --upgrade --force-reinstall trl unsloth unsloth-zoo\n"
+            "Then re-run: python3 3_finetune.py (will resume from checkpoint if available)",
         )
         sys.exit(1)
 
