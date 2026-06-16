@@ -1,0 +1,13 @@
+.env
+models/
+data/*.jsonl
+outputs/*
+!outputs/.gitkeep
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+wandb/
+*.gguf
+.venv/
+venv/
