@@ -207,7 +207,6 @@ def finetune() -> None:
         gradient_checkpointing=True,
         dataloader_num_workers=0,
         dataloader_pin_memory=False,
-        save_safetensors=True,
     )
 
     callbacks = [EarlyStoppingCallback(early_stopping_patience=3)]
