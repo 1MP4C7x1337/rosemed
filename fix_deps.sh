@@ -1,37 +1,44 @@
 #!/usr/bin/env bash
-# Fix NumPy 2.x + TRL 1.x conflicts on Lightning.ai (conda cloudspace)
+# ONE-SHOT fix for Lightning.ai conda cloudspace — run: bash fix_deps.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 
-echo "══════════════════════════════════════════"
-echo "  RoseMed dependency fix (Lightning.ai)"
-echo "══════════════════════════════════════════"
+echo "RoseMed: fixing all dependencies..."
 
-pip install --upgrade pip
+pip install --upgrade pip -q
 
-echo "[1/4] Force NumPy 1.x (fixes Inf import error)..."
-pip install "numpy==1.26.4" --force-reinstall --no-deps
-pip install "scipy>=1.11.0,<1.28.0" --force-reinstall
+# 1. Rebuild numeric stack TOGETHER (fixes numpy.Inf + sklearn dtype errors)
+pip uninstall -y scikit-learn scipy numpy 2>/dev/null || true
+pip install --no-cache-dir "numpy==1.26.4"
+pip install --no-cache-dir "scipy==1.11.4"
+pip install --no-cache-dir "scikit-learn==1.4.2"
 
-echo "[2/4] Pin TRL for unsloth-zoo compatibility..."
-pip install "trl==0.11.4" --force-reinstall
+# 2. Pin ML stack compatible with unsloth-zoo
+pip install --no-cache-dir \
+  "transformers==4.44.2" \
+  "peft==0.12.0" \
+  "trl==0.11.4" \
+  "datasets>=2.19.0" \
+  "accelerate>=0.30.0" \
+  "bitsandbytes>=0.43.0" \
+  "sentencepiece" \
+  "protobuf"
 
-echo "[3/4] Install unsloth + unsloth-zoo..."
-pip install unsloth-zoo --force-reinstall
-pip install "unsloth @ git+https://github.com/unslothai/unsloth.git" --force-reinstall || pip install unsloth --force-reinstall
+# 3. Unsloth last
+pip install --no-cache-dir "unsloth-zoo"
+pip install --no-cache-dir "unsloth==2024.6.7" || \
+pip install --no-cache-dir "unsloth @ git+https://github.com/unslothai/unsloth.git"
 
-echo "[4/4] Verify..."
-python3 << 'PYEOF'
+echo ""
+python3 -c "
 import numpy as np
-assert np.__version__.startswith("1."), f"NumPy must be 1.x, got {np.__version__}"
-import scipy
-import trl
+import sklearn
 import unsloth
 import unsloth_zoo
-print(f"numpy  {np.__version__}  OK")
-print(f"scipy  {scipy.__version__}  OK")
-print(f"trl    {trl.__version__}  OK")
-print("unsloth + unsloth_zoo  OK")
-print("")
-print("Run: python3 3_finetune.py")
-PYEOF
+import trl
+print('numpy', np.__version__)
+print('sklearn', sklearn.__version__)
+print('trl', trl.__version__)
+print('')
+print('SUCCESS — now run:  python3 3_finetune.py')
+"
