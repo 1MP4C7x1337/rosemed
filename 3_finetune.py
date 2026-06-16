@@ -52,10 +52,24 @@ def _setup_wandb(cfg: Any) -> Optional[str]:
 
 
 def _has_checkpoint(output_dir: Path) -> bool:
-    """Return True if a training checkpoint exists to resume from."""
+    """Return True if a valid training checkpoint exists to resume from."""
     if not output_dir.exists():
         return False
-    return any(output_dir.glob("checkpoint-*"))
+    for ckpt in sorted(output_dir.glob("checkpoint-*"), reverse=True):
+        if (ckpt / "trainer_state.json").exists():
+            return True
+    return False
+
+
+def _clean_broken_checkpoints(output_dir: Path) -> None:
+    """Remove incomplete checkpoint folders missing trainer_state.json."""
+    if not output_dir.exists():
+        return
+    for ckpt in output_dir.glob("checkpoint-*"):
+        if not (ckpt / "trainer_state.json").exists():
+            import shutil
+            console.print(f"[yellow]Removing broken checkpoint:[/yellow] {ckpt}")
+            shutil.rmtree(ckpt, ignore_errors=True)
 
 
 def finetune() -> None:
@@ -178,6 +192,7 @@ def finetune() -> None:
     val_dataset = Dataset.from_list(val_samples)
 
     cfg.training.output_dir.mkdir(parents=True, exist_ok=True)
+    _clean_broken_checkpoints(cfg.training.output_dir)
 
     wandb_run_name = _setup_wandb(cfg)
     report_to = "wandb" if wandb_run_name else "none"
