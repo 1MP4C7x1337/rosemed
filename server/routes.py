@@ -43,6 +43,24 @@ def _append_disclaimer(text: str) -> str:
     return text
 
 
+def _get_retriever(request: Request) -> Any:
+    """Retrieve the knowledge retriever from app state."""
+    return getattr(request.app.state, "retriever", None)
+
+
+def _build_rag_message(user_message: str, request: Request) -> tuple[str, List[Any]]:
+    """Augment user message with retrieved WHO/Bulgarian context."""
+    retriever = _get_retriever(request)
+    if retriever is None or not retriever.chunks:
+        return user_message, []
+    hits = retriever.retrieve(user_message, top_k=5)
+    context = retriever.build_context(user_message, top_k=5)
+    if not context:
+        return user_message, []
+    augmented = f"{context}\n\nВъпрос: {user_message}"
+    return augmented, hits
+
+
 def _build_prompt(system: str, user_message: str, history: List[Dict[str, str]]) -> str:
     """Build a chat prompt from system message, history, and user input."""
     return build_inference_prompt(user_message, history, system)
@@ -63,7 +81,8 @@ async def chat(request: Request, body: ChatRequest) -> ChatResponse:
     engine = _get_model_engine(request)
 
     history_dicts = [{"role": m.role, "content": m.content} for m in body.history]
-    prompt = _build_prompt(cfg.system_prompt, body.message, history_dicts)
+    user_msg, hits = _build_rag_message(body.message, request)
+    prompt = _build_prompt(cfg.system_prompt, user_msg, history_dicts)
 
     try:
         reply, tokens_used = await engine.generate(
@@ -84,6 +103,9 @@ async def chat(request: Request, body: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=500, detail="Inference error")
 
     reply = _append_disclaimer(reply)
+    retriever = _get_retriever(request)
+    if retriever and hits:
+        reply += retriever.format_citations(hits)
     return ChatResponse(
         reply=reply,
         model=cfg.model.output_model_name,
@@ -100,13 +122,13 @@ async def diagnose(request: Request, body: DiagnoseRequest) -> DiagnoseResponse:
 
     symptoms_str = ", ".join(body.symptoms)
     gender_bg = "мъж" if body.gender.value == "M" else "жена"
-    prompt = _build_prompt(
-        cfg.system_prompt,
+    user_msg = (
         f"Анализирай следните симптоми при {body.age}-годишен {gender_bg}: {symptoms_str}. "
         f"Посочи възможни състояния, препоръки и ниво на спешност (low/medium/high/emergency). "
-        f"Отговори на български в структуриран формат.",
-        [],
+        f"Отговори на български в структуриран формат."
     )
+    user_msg, _ = _build_rag_message(user_msg, request)
+    prompt = _build_prompt(cfg.system_prompt, user_msg, [])
 
     try:
         reply, _ = await engine.generate(prompt, max_new_tokens=512, temperature=0.5, top_p=0.9)
@@ -139,12 +161,12 @@ async def medication(request: Request, body: MedicationRequest) -> MedicationRes
     }
     query_label = query_labels.get(body.query_type.value, body.query_type.value)
 
-    prompt = _build_prompt(
-        cfg.system_prompt,
+    user_msg = (
         f"Предостави информация за лекарството '{body.medication_name}' относно: {query_label}. "
-        f"Посочи дали е регистрирано в България и дали се покрива от НЗОК.",
-        [],
+        f"Посочи дали е регистрирано в България и дали се покрива от НЗОК."
     )
+    user_msg, _ = _build_rag_message(user_msg, request)
+    prompt = _build_prompt(cfg.system_prompt, user_msg, [])
 
     try:
         reply, _ = await engine.generate(prompt, max_new_tokens=512, temperature=0.5, top_p=0.9)

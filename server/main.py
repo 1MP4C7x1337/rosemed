@@ -19,6 +19,7 @@ from slowapi.errors import RateLimitExceeded
 
 from config import get_config
 from server.limiter import limiter
+from server.rag import KnowledgeRetriever
 from server.routes import router
 
 cfg = get_config()
@@ -184,7 +185,10 @@ async def lifespan(app: FastAPI):
     backend = engine.load()
     app.state.model_engine = engine
     app.state.backend = backend
-    logger.info("Server ready (backend: %s)", backend)
+    retriever = KnowledgeRetriever()
+    chunk_count = retriever.load()
+    app.state.retriever = retriever
+    logger.info("Server ready (backend: %s, knowledge chunks: %d)", backend, chunk_count)
     yield
     logger.info("Shutting down RoseMed server...")
     app.state.model_engine = None

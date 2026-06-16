@@ -1,6 +1,9 @@
 .env
 models/
 data/*.jsonl
+data/knowledge_base/*.jsonl
+data/sources/raw/*
+!data/sources/raw/.gitkeep
 outputs/*
 !outputs/.gitkeep
 logs/
